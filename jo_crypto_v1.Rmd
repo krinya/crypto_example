@@ -1,0 +1,137 @@
+---
+title: "Crypto Probalkozas"
+output:
+  html_document: default
+  pdf_document: default
+---
+### Import some libraries:
+```{r, message=FALSE, warning= FALSE}
+library(binancer)
+library(ggplot2)
+library(data.table)
+library(plotly)
+library(ggrepel)
+library(treemap)
+library(coinmarketcapr)
+```
+
+### Our 1st plot:
+```{r}
+market_today <- get_marketcap_ticker_all()
+market_today$market_cap_usd <- as.numeric(market_today$market_cap_usd)
+
+market_today$toplot_name <- paste0(market_today$name,
+                                   '\n',
+                                   '$',
+                                   format(market_today$market_cap_usd,big.mark = ',',
+                                          scientific = F,
+                                          trim = T))
+
+tremap_plot <- treemap(market_today,
+                       index = 'toplot_name',
+                       vSize = 'market_cap_usd',
+                       title = 'Cryptocurrency Market Cap',
+                       fontsize.labels=c(10, 5),
+                       palette='RdYlGn')
+```
+
+### Move on:
+
+##### Get the data:
+
+I used binancer to get the exchange data from Binance:
+
+```{r}
+options(scipen=999) #disable scientific notation
+
+# simple outlook:
+data_1 <- binance_ticker_all_prices()
+
+all <- data_1[data_1$symbol %like% "ETH", symbol]
+#remove some currency pairs
+remove <- c("ETHBTC", "ETHUSDT") 
+all <- all[!all %in% remove]
+
+klines_base <- rbindlist(lapply(c("ETHUSDT"),
+                                binance_klines,
+                                interval = "1d",
+                                limit = 200))
+
+klines_base <- klines_base[, c("open_time", "open", "symbol")]
+
+colnames(klines_base)[2] <- "open_ETH"
+colnames(klines_base)[3] <- "symbol_2"
+
+# coins I own:
+coins <- c("XLMETH",
+           "AMBETH",
+           "ENGETH",
+           "IOTAETH",
+           "WAVESETH",
+           "EOSETH",
+           "OMGETH",
+           "WTCETH",
+           "NEOETH",
+           "DGDETH",
+           "ZECETH")
+
+# if you write here all instead of coins you will get all avaliable cryptocurrencies from Binance
+klines <- rbindlist(lapply(coins,
+                           binance_klines,
+                           interval = "1d",
+                           limit = 200))
+
+klines <- merge(klines,
+                klines_base,
+                by = "open_time",
+                all.x = T)
+```
+
+Set the time from the analyzes time frame:
+
+```{r}
+time <- "2017-10-01"
+```
+
+Calculate return:
+```{r}
+min_time <- min(klines$open_time)
+klines <- klines[open_time > time]
+
+klines[, dollar_ar:= open * open_ETH]
+klines[, seged_ar:= head(dollar_ar, 1), by = symbol]
+klines[, percent_ar:= dollar_ar/seged_ar]
+
+klines$symbol_javitott <- strsplit(klines$symbol, split="ETH")
+klines$symbol_javitott <- unlist(klines$symbol_javitott, use.names=FALSE)
+```
+
+### Do some plotting:
+
+Simple return chart together:
+
+```{r, message=FALSE, warning= FALSE}
+ggplotly(ggplot(klines,
+            aes(x=open_time,
+                y=percent_ar,
+                color = symbol_javitott)) +  geom_line(size = 1))
+```
+
+Separately:
+
+```{r, message=FALSE, warning= FALSE}
+ggplot(klines, aes(x=open_time, y=percent_ar)) + geom_line(size = 1) + facet_wrap(~symbol_javitott, scales = "free_y") + geom_smooth()
+```
+
+### Do a variance plot:
+```{r, message=FALSE, warning= FALSE}
+variance_plot <- klines[, .(var = var(percent_ar), return = tail(percent_ar, 1)), by = symbol_javitott]
+
+ggplotly(ggplot(variance_plot, aes(x=var, y=return, label = symbol_javitott)) + geom_point(size = 3) + geom_text() + geom_smooth(method = "lm"))
+```
+
+### filter for only < 20 variance and remove points:
+```{r, message=FALSE, warning= FALSE}
+ggplotly(ggplot(variance_plot[var < 20], aes(x=var, y=return, label = symbol_javitott)) + geom_text() + geom_smooth(method = "lm"))
+```
+
